@@ -16,7 +16,6 @@ import core.canal as canal
 import network.comunicacao as net_core
 
 
-# ── Paleta ──────────────────────────────────────────────────────────────────
 C = {
     "bg":        "#f0f2f5",
     "card":      "#ffffff",
@@ -32,9 +31,15 @@ C = {
     "arrow":     "#94a3b8",
     "plot_bg":   "#fafafa",
     "grid":      "#e2e8f0",
+    "entry_bg":  "#ffffff",
 }
 
 STEP_COLORS = ["#dbeafe", "#dcfce7", "#fef9c3", "#fce7f3", "#ede9fe", "#ffedd5", "#f0fdf4"]
+
+FRAMING_VALUES = ["Contagem de Caracteres", "Inserção de Bytes", "Inserção de Bits"]
+ERROR_VALUES = ["Bit de Paridade Par", "Checksum (8-bit)", "CRC-32 (IEEE 802)", "Código de Hamming"]
+DIGITAL_VALUES = ["NRZ-Polar", "Manchester", "Bipolar (AMI)"]
+ANALOG_VALUES = ["Nenhum", "ASK", "FSK", "QPSK", "16-QAM"]
 
 
 class TelecomSimulatorApp:
@@ -47,9 +52,6 @@ class TelecomSimulatorApp:
         self._apply_theme()
 
         self.gui_queue = None
-        self.last_tx_bits = []
-        self.last_tx_pipeline = {}
-        self.last_original_message = ""
 
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill="both", expand=True, padx=16, pady=16)
@@ -80,9 +82,7 @@ class TelecomSimulatorApp:
             background=[("selected", C["card"])],
             foreground=[("selected", C["accent"])],
         )
-        self.style.configure(
-            "TLabelframe", background=C["bg"], borderwidth=1, relief="solid",
-        )
+        self.style.configure("TLabelframe", background=C["bg"], borderwidth=1, relief="solid")
         self.style.configure(
             "TLabelframe.Label", font=("Segoe UI", 10, "bold"),
             background=C["bg"], foreground=C["text"],
@@ -94,9 +94,22 @@ class TelecomSimulatorApp:
         )
         self.style.map("Accent.TButton", background=[("active", C["accent_h"])])
         self.style.configure("TCombobox", font=("Segoe UI", 10))
-        self.style.configure("TEntry", font=("Segoe UI", 10), padding=4)
 
-    # ── Utilitários de exibição ───────────────────────────────────────────────
+    def _make_entry(self, parent, width=30, initial=""):
+        """tk.Entry com cursor visível no macOS (ttk.Entry costuma ocultá-lo)."""
+        entry = tk.Entry(
+            parent, width=width, font=("Segoe UI", 10),
+            bg=C["entry_bg"], fg=C["text"],
+            insertbackground=C["text"], insertwidth=2,
+            relief="solid", borderwidth=1,
+            highlightthickness=1, highlightcolor=C["accent"],
+            highlightbackground=C["border"],
+        )
+        if initial:
+            entry.insert(0, initial)
+        return entry
+
+    # ── Utilitários ───────────────────────────────────────────────────────────
 
     @staticmethod
     def _bits_str(bits: list[bool], max_len: int = 64) -> str:
@@ -111,6 +124,13 @@ class TelecomSimulatorApp:
         if len(arr) == 0:
             return "vazio"
         return f"{len(arr)} amostras  |  min={arr.min():.2f}  max={arr.max():.2f}  média={arr.mean():.3f}"
+
+    @staticmethod
+    def _trim_trailing_padding_bits(bits: list[bool]) -> list[bool]:
+        trimmed = list(bits)
+        while trimmed and not trimmed[-1]:
+            trimmed.pop()
+        return trimmed
 
     def _make_scrollable(self, parent):
         outer = ttk.Frame(parent)
@@ -160,10 +180,9 @@ class TelecomSimulatorApp:
             ).pack(side="left", padx=8)
 
             if step.get("badge"):
-                badge_color = step.get("badge_color", C["muted"])
                 tk.Label(
-                    header, text=step["badge"], bg=badge_color, fg="white",
-                    font=("Segoe UI", 8, "bold"), padx=6, pady=1,
+                    header, text=step["badge"], bg=step.get("badge_color", C["muted"]),
+                    fg="white", font=("Segoe UI", 8, "bold"), padx=6, pady=1,
                 ).pack(side="right")
 
             tk.Label(
@@ -175,17 +194,72 @@ class TelecomSimulatorApp:
                 mono = tk.Text(
                     card, height=step.get("mono_lines", 2), wrap="none",
                     font=("Courier New", 9), bg="#1e293b", fg="#e2e8f0",
-                    relief="flat", padx=8, pady=6,
+                    relief="flat", padx=8, pady=6, insertbackground="#e2e8f0",
                 )
                 mono.insert("1.0", step["mono"])
                 mono.config(state="disabled")
                 mono.pack(fill="x", pady=(6, 0))
 
             if i < len(steps) - 1:
-                tk.Label(
-                    container, text="▼", bg=C["bg"], fg=C["arrow"],
-                    font=("Segoe UI", 11),
-                ).pack(pady=2)
+                tk.Label(container, text="▼", bg=C["bg"], fg=C["arrow"], font=("Segoe UI", 11)).pack(pady=2)
+
+    def _add_protocol_combos(self, parent):
+        """Comboboxes de protocolo — apenas no transmissor."""
+        combos = {}
+
+        ttk.Label(parent, text="Enquadramento:").pack(anchor="w")
+        combos["framing"] = ttk.Combobox(parent, values=FRAMING_VALUES, state="readonly", width=28)
+        combos["framing"].current(0)
+        combos["framing"].pack(fill="x", pady=(2, 10))
+
+        ttk.Label(parent, text="Resistência a Erros (EDC):").pack(anchor="w")
+        combos["error"] = ttk.Combobox(parent, values=ERROR_VALUES, state="readonly", width=28)
+        combos["error"].current(2)
+        combos["error"].pack(fill="x", pady=(2, 10))
+
+        ttk.Label(parent, text="Modulação Digital:").pack(anchor="w")
+        combos["digital"] = ttk.Combobox(parent, values=DIGITAL_VALUES, state="readonly", width=28)
+        combos["digital"].current(0)
+        combos["digital"].pack(fill="x", pady=(2, 10))
+
+        ttk.Label(parent, text="Modulação Portadora:").pack(anchor="w")
+        combos["analog"] = ttk.Combobox(parent, values=ANALOG_VALUES, state="readonly", width=28)
+        combos["analog"].current(0)
+        combos["analog"].pack(fill="x", pady=(2, 4))
+
+        lock_lbl = ttk.Label(
+            parent, text="", foreground=C["muted"], font=("Segoe UI", 8),
+        )
+        lock_lbl.pack(anchor="w", pady=(0, 6))
+        combos["lock_lbl"] = lock_lbl
+
+        def on_analog_change(_event=None):
+            if combos["analog"].get() == "Nenhum":
+                combos["digital"].config(state="readonly")
+                lock_lbl.config(text="")
+            else:
+                combos["digital"].set("NRZ-Polar")
+                combos["digital"].config(state="disabled")
+                lock_lbl.config(
+                    text="ℹ  Com portadora ativa, digital trava em NRZ-Polar.",
+                    foreground=C["accent"],
+                )
+
+        combos["analog"].bind("<<ComboboxSelected>>", on_analog_change)
+        on_analog_change()
+        return combos
+
+    def _update_rx_protocol_info(self, pacote: dict):
+        """Exibe parâmetros recebidos via pickle (somente leitura)."""
+        linhas = [
+            f"Enquadramento: {pacote['framing_choice']}",
+            f"EDC: {pacote['error_choice']}",
+            f"Digital: {pacote['mod_digital']}",
+            f"Portadora: {pacote['mod_analog']}",
+            f"Meio: {pacote['tx_mode']}",
+            f"Ruído aplicado: μ={pacote.get('media', 0)}, σ={pacote.get('desvio', 0)}",
+        ]
+        self.lbl_rx_protocol.config(text="\n".join(linhas))
 
     # ── Aba Transmissor ───────────────────────────────────────────────────────
 
@@ -193,70 +267,26 @@ class TelecomSimulatorApp:
         paned = ttk.PanedWindow(self.tab_transmitter, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # ── Controles ──
         ctrl_outer = ttk.LabelFrame(paned, text=" Configurações ", padding=14)
         paned.add(ctrl_outer, weight=0)
 
         ttk.Label(ctrl_outer, text="Mensagem:").pack(anchor="w")
-        self.entry_message = ttk.Entry(ctrl_outer, width=30)
+        self.entry_message = self._make_entry(ctrl_outer, width=32, initial="Ola!")
         self.entry_message.pack(fill="x", pady=(2, 10))
-        self.entry_message.insert(0, "Ola!")
 
-        ttk.Label(ctrl_outer, text="Enquadramento:").pack(anchor="w")
-        self.combo_framing = ttk.Combobox(
-            ctrl_outer,
-            values=["Contagem de Caracteres", "Inserção de Bytes", "Inserção de Bits"],
-            state="readonly", width=28,
-        )
-        self.combo_framing.current(0)
-        self.combo_framing.pack(fill="x", pady=(2, 10))
+        self.tx_combos = self._add_protocol_combos(ctrl_outer)
 
-        ttk.Label(ctrl_outer, text="Resistência a Erros (EDC):").pack(anchor="w")
-        self.combo_error = ttk.Combobox(
-            ctrl_outer,
-            values=["Bit de Paridade Par", "Checksum (8-bit)", "CRC-32 (IEEE 802)", "Código de Hamming"],
-            state="readonly", width=28,
-        )
-        self.combo_error.current(2)
-        self.combo_error.pack(fill="x", pady=(2, 10))
-
-        ttk.Label(ctrl_outer, text="Modulação Digital:").pack(anchor="w")
-        self.combo_mod_digital = ttk.Combobox(
-            ctrl_outer, values=["NRZ-Polar", "Manchester", "Bipolar (AMI)"],
-            state="readonly", width=28,
-        )
-        self.combo_mod_digital.current(0)
-        self.combo_mod_digital.pack(fill="x", pady=(2, 10))
-
-        ttk.Label(ctrl_outer, text="Modulação Portadora:").pack(anchor="w")
-        self.combo_mod_analog = ttk.Combobox(
-            ctrl_outer, values=["Nenhum", "ASK", "FSK", "QPSK", "16-QAM"],
-            state="readonly", width=28,
-        )
-        self.combo_mod_analog.current(0)
-        self.combo_mod_analog.pack(fill="x", pady=(2, 4))
-        self.combo_mod_analog.bind("<<ComboboxSelected>>", self._on_analog_changed)
-
-        self.lbl_nrz_lock = ttk.Label(
-            ctrl_outer,
-            text="ℹ  Com portadora ativa, digital trava em NRZ-Polar.",
-            foreground=C["muted"], font=("Segoe UI", 8),
-        )
-        self.lbl_nrz_lock.pack(anchor="w", pady=(0, 10))
-
-        noise_frame = ttk.LabelFrame(ctrl_outer, text=" Canal AWGN ", padding=10)
-        noise_frame.pack(fill="x", pady=(0, 14))
+        noise_frame = ttk.LabelFrame(ctrl_outer, text=" Ruído ", padding=10)
+        noise_frame.pack(fill="x", pady=(8, 14))
 
         nf = ttk.Frame(noise_frame)
         nf.pack(fill="x")
         ttk.Label(nf, text="μ:").grid(row=0, column=0, sticky="w", padx=2)
-        self.entry_media = ttk.Entry(nf, width=8)
+        self.entry_media = self._make_entry(nf, width=8, initial="0.0")
         self.entry_media.grid(row=0, column=1, padx=4)
-        self.entry_media.insert(0, "0.0")
         ttk.Label(nf, text="σ:").grid(row=0, column=2, sticky="w", padx=(10, 2))
-        self.entry_desvio = ttk.Entry(nf, width=8)
+        self.entry_desvio = self._make_entry(nf, width=8, initial="0.0")
         self.entry_desvio.grid(row=0, column=3, padx=4)
-        self.entry_desvio.insert(0, "0.5")
 
         self.btn_transmit = ttk.Button(
             ctrl_outer, text="▶  TRANSMITIR", style="Accent.TButton",
@@ -264,7 +294,6 @@ class TelecomSimulatorApp:
         )
         self.btn_transmit.pack(fill="x", ipady=4)
 
-        # ── Painel central: pipeline ──
         mid_paned = ttk.PanedWindow(paned, orient="vertical")
         paned.add(mid_paned, weight=3)
 
@@ -277,7 +306,6 @@ class TelecomSimulatorApp:
             "detail": "Configure os parâmetros e clique em TRANSMITIR para visualizar cada etapa.",
         }])
 
-        # ── Gráficos TX ──
         plots_frame = ttk.LabelFrame(mid_paned, text=" Sinais a Enviar ", padding=8)
         mid_paned.add(plots_frame, weight=3)
 
@@ -287,8 +315,6 @@ class TelecomSimulatorApp:
         self.fig_tx.subplots_adjust(hspace=0.45, left=0.08, right=0.97, top=0.93, bottom=0.10)
         self.canvas_tx = FigureCanvasTkAgg(self.fig_tx, master=plots_frame)
         self.canvas_tx.get_tk_widget().pack(fill="both", expand=True)
-
-        self._on_analog_changed()
         self._clear_tx_plots()
 
     # ── Aba Receptor ──────────────────────────────────────────────────────────
@@ -297,54 +323,47 @@ class TelecomSimulatorApp:
         paned = ttk.PanedWindow(self.tab_receiver, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # ── Status lateral ──
-        status_frame = ttk.LabelFrame(paned, text=" Resultado ", padding=14)
-        paned.add(status_frame, weight=0)
+        ctrl_outer = ttk.LabelFrame(paned, text=" Receptor ", padding=14)
+        paned.add(ctrl_outer, weight=0)
 
-        ttk.Label(status_frame, text="Mensagem Original:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.lbl_original_msg = ttk.Label(
-            status_frame, text="—", font=("Courier New", 14), foreground=C["muted"],
+        proto_frame = ttk.LabelFrame(ctrl_outer, text=" Parâmetros recebidos (pickle / socket) ", padding=10)
+        proto_frame.pack(fill="x", pady=(0, 12))
+
+        self.lbl_rx_protocol = ttk.Label(
+            proto_frame,
+            text="Aguardando pacote via socket…",
+            foreground=C["muted"], font=("Segoe UI", 9), justify="left",
         )
-        self.lbl_original_msg.pack(anchor="w", pady=(2, 12))
+        self.lbl_rx_protocol.pack(anchor="w")
+
+        status_frame = ttk.LabelFrame(ctrl_outer, text=" Resultado ", padding=10)
+        status_frame.pack(fill="x")
 
         ttk.Label(status_frame, text="Mensagem Recuperada:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         self.lbl_decoded_msg = ttk.Label(
-            status_frame, text="Aguardando…", font=("Courier New", 14, "bold"), foreground=C["muted"],
+            status_frame, text="Aguardando sinal…",
+            font=("Courier New", 13, "bold"), foreground=C["muted"],
         )
-        self.lbl_decoded_msg.pack(anchor="w", pady=(2, 12))
+        self.lbl_decoded_msg.pack(anchor="w", pady=(4, 10))
 
-        stats_frame = tk.Frame(status_frame, bg=C["step_bg"], highlightbackground=C["border"], highlightthickness=1)
-        stats_frame.pack(fill="x", pady=(0, 12))
-        self.lbl_ber = tk.Label(
-            stats_frame, text="BER físico: —", bg=C["step_bg"], fg=C["text"],
+        info = tk.Frame(status_frame, bg=C["step_bg"], highlightbackground=C["border"], highlightthickness=1)
+        info.pack(fill="x")
+        self.lbl_rx_signal = tk.Label(
+            info, text="Sinal recebido: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9), anchor="w", padx=10, pady=4,
         )
-        self.lbl_ber.pack(fill="x")
+        self.lbl_rx_signal.pack(fill="x")
         self.lbl_edc = tk.Label(
-            stats_frame, text="EDC: —", bg=C["step_bg"], fg=C["text"],
+            info, text="EDC: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9), anchor="w", padx=10, pady=4,
         )
         self.lbl_edc.pack(fill="x")
-        self.lbl_match = tk.Label(
-            stats_frame, text="Integridade: —", bg=C["step_bg"], fg=C["text"],
+        self.lbl_decode = tk.Label(
+            info, text="Decodificação: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9, "bold"), anchor="w", padx=10, pady=4,
         )
-        self.lbl_match.pack(fill="x")
+        self.lbl_decode.pack(fill="x")
 
-        ttk.Label(status_frame, text="Comparação caractere a caractere:", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.text_diff = tk.Text(
-            status_frame, width=34, height=6, wrap="word",
-            font=("Courier New", 11), bg="#1e293b", fg="#e2e8f0",
-            relief="flat", padx=8, pady=6,
-        )
-        self.text_diff.pack(fill="x", pady=(4, 0))
-        self.text_diff.tag_configure("ok", foreground="#4ade80")
-        self.text_diff.tag_configure("bad", foreground="#f87171", underline=True)
-        self.text_diff.tag_configure("missing", foreground="#fb923c")
-        self.text_diff.insert("1.0", "Aguardando transmissão…")
-        self.text_diff.config(state="disabled")
-
-        # ── Centro: pipeline + gráficos ──
         mid_paned = ttk.PanedWindow(paned, orient="vertical")
         paned.add(mid_paned, weight=3)
 
@@ -353,8 +372,12 @@ class TelecomSimulatorApp:
         scroll_outer, self.rx_pipeline_container = self._make_scrollable(pipe_frame)
         scroll_outer.pack(fill="both", expand=True)
         self._render_pipeline_steps(self.rx_pipeline_container, [{
-            "num": "—", "title": "Aguardando sinal",
-            "detail": "O receptor processará o sinal assim que uma transmissão chegar.",
+            "num": "—", "title": "Aguardando pacote via socket",
+            "detail": (
+                "O servidor TCP (thread separada) desserializa o pacote pickle enviado "
+                "pelo transmissor: sinal corrompido + parâmetros de protocolo para "
+                "demodulação, EDC e desenquadramento. A mensagem original não é enviada."
+            ),
         }])
 
         plots_frame = ttk.LabelFrame(mid_paned, text=" Sinais Recebidos e Decodificados ", padding=8)
@@ -387,7 +410,6 @@ class TelecomSimulatorApp:
             0.5, 0.5, "Nenhum sinal gerado", transform=self.ax_tx_digital.transAxes,
             ha="center", va="center", color=C["muted"], fontsize=11,
         )
-
         self.ax_tx_carrier.clear()
         self._style_axis(self.ax_tx_carrier, "Modulação Portadora (desativada)", "Amostras", "Amplitude (V)")
         self.ax_tx_carrier.text(
@@ -399,12 +421,11 @@ class TelecomSimulatorApp:
 
     def _clear_rx_plots(self):
         self.ax_rx_signal.clear()
-        self._style_axis(self.ax_rx_signal, "Canal: sinal esperado vs. recebido", "Amostras", "Amplitude")
+        self._style_axis(self.ax_rx_signal, "Sinal recebido via socket", "Amostras", "Amplitude")
         self.ax_rx_signal.text(
             0.5, 0.5, "Aguardando sinal…", transform=self.ax_rx_signal.transAxes,
             ha="center", va="center", color=C["muted"], fontsize=11,
         )
-
         self.ax_rx_decoded.clear()
         self._style_axis(self.ax_rx_decoded, "Bits decodificados (camada física)", "Posição do bit", "Valor lógico")
         self.ax_rx_decoded.text(
@@ -415,8 +436,7 @@ class TelecomSimulatorApp:
 
     def _plot_digital_signal(self, ax, signal, color="#2563eb", label="Sinal digital", max_pts=300):
         sig = signal[:max_pts]
-        x = np.arange(len(sig))
-        ax.step(x, sig, where="post", color=color, lw=1.8, label=label, alpha=0.9)
+        ax.step(np.arange(len(sig)), sig, where="post", color=color, lw=1.8, label=label, alpha=0.9)
         if len(signal) > max_pts:
             ax.annotate(
                 f"… {len(signal)} amostras totais",
@@ -440,38 +460,27 @@ class TelecomSimulatorApp:
                 ha="right", fontsize=8, color=C["muted"],
             )
 
-    def _plot_rx_signal_overlay(self, ax, clean, noisy, tx_mode, mod_analog):
+    def _plot_received_signal(self, ax, noisy_signal, tx_mode, mod_analog):
         max_pts = 250 if tx_mode == "Cabo" else 2000
-        clean_s = clean[:max_pts]
-        noisy_s = noisy[:max_pts]
-        x = np.arange(len(clean_s))
-
-        if tx_mode == "Cabo":
-            self._plot_waveform(ax, clean_s, color="#94a3b8", label="Esperado (limpo)", max_pts=max_pts, step=True)
-            self._plot_waveform(ax, noisy_s, color="#ea580c", label="Recebido (com ruído)", max_pts=max_pts, step=True)
-        else:
-            self._plot_waveform(ax, clean_s, color="#94a3b8", label="Esperado (limpo)", max_pts=max_pts)
-            self._plot_waveform(ax, noisy_s, color="#ea580c", label="Recebido (com ruído)", max_pts=max_pts)
-
+        step = tx_mode == "Cabo"
+        self._plot_waveform(
+            ax, noisy_signal, color="#2563eb",
+            label="Sinal recebido", max_pts=max_pts, step=step,
+        )
         ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
-        title = f"Sinal no canal ({'banda base' if tx_mode == 'Cabo' else mod_analog})"
-        ax.set_title(title, fontsize=10, fontweight="bold", color=C["text"], pad=8)
-
-    def _plot_decoded_bits(self, ax, tx_bits, rx_bits, max_bits=120):
-        n = min(len(rx_bits), max_bits)
-        tx_trim = tx_bits[:n]
-        rx_trim = rx_bits[:n]
-        x = np.arange(n)
-
-        tx_int = [1 if b else 0 for b in tx_trim]
-        rx_int = [1 if b else 0 for b in rx_trim]
-
-        ax.step(x, tx_int, where="post", color="#94a3b8", lw=1.5, label="Esperado", alpha=0.7)
-        ax.step(x, rx_int, where="post", color="#16a34a", lw=1.8, label="Decodificado", alpha=0.9)
-
-        errors = sum(1 for a, b in zip(tx_trim, rx_trim) if a != b)
+        meio = "banda base (cabo)" if tx_mode == "Cabo" else mod_analog
         ax.set_title(
-            f"Bits decodificados  ({errors} erro(s) nos primeiros {n} bits)",
+            f"Sinal recebido via socket — {meio}",
+            fontsize=10, fontweight="bold", color=C["text"], pad=8,
+        )
+
+    def _plot_decoded_bits(self, ax, rx_bits, max_bits=120):
+        n = min(len(rx_bits), max_bits)
+        rx_trim = rx_bits[:n]
+        rx_int = [1 if b else 0 for b in rx_trim]
+        ax.step(np.arange(n), rx_int, where="post", color="#16a34a", lw=1.8, label="Bits decodificados")
+        ax.set_title(
+            f"Bits decodificados — {len(rx_bits)} bits totais",
             fontsize=10, fontweight="bold", color=C["text"], pad=8,
         )
         ax.set_xlabel("Posição do bit", fontsize=9, color=C["muted"])
@@ -481,46 +490,7 @@ class TelecomSimulatorApp:
         ax.legend(loc="upper right", fontsize=8)
         ax.grid(True, linestyle="--", alpha=0.5, color=C["grid"])
 
-    # ── Comparação de mensagens ───────────────────────────────────────────────
-
-    def _update_diff_view(self, original: str, recovered: str | None):
-        self.text_diff.config(state="normal")
-        self.text_diff.delete("1.0", tk.END)
-
-        if recovered is None:
-            self.text_diff.insert(tk.END, "Não foi possível recuperar texto.")
-            self.text_diff.config(state="disabled")
-            return
-
-        max_len = max(len(original), len(recovered))
-        for i in range(max_len):
-            orig_c = original[i] if i < len(original) else None
-            recv_c = recovered[i] if i < len(recovered) else None
-
-            if orig_c is None:
-                self.text_diff.insert(tk.END, recv_c, "missing")
-            elif recv_c is None:
-                self.text_diff.insert(tk.END, orig_c, "bad")
-            elif orig_c == recv_c:
-                self.text_diff.insert(tk.END, orig_c, "ok")
-            else:
-                self.text_diff.insert(tk.END, recv_c, "bad")
-
-        self.text_diff.config(state="disabled")
-
-    # ── Eventos ───────────────────────────────────────────────────────────────
-
-    def _on_analog_changed(self, event=None):
-        if self.combo_mod_analog.get() == "Nenhum":
-            self.combo_mod_digital.config(state="readonly")
-            self.lbl_nrz_lock.config(text="")
-        else:
-            self.combo_mod_digital.set("NRZ-Polar")
-            self.combo_mod_digital.config(state="disabled")
-            self.lbl_nrz_lock.config(
-                text="ℹ  Com portadora ativa, digital trava em NRZ-Polar.",
-                foreground=C["accent"],
-            )
+    # ── Codificação / decodificação ───────────────────────────────────────────
 
     def _encode_digital(self, bits, mod_digital):
         if mod_digital == "NRZ-Polar":
@@ -548,6 +518,8 @@ class TelecomSimulatorApp:
 
         return digital_core.decode_nrz_polar(rx_dig)
 
+    # ── Transmissão ───────────────────────────────────────────────────────────
+
     def _on_transmit_clicked(self):
         message_text = self.entry_message.get()
         if not message_text:
@@ -557,20 +529,17 @@ class TelecomSimulatorApp:
             media = float(self.entry_media.get())
             desvio = float(self.entry_desvio.get())
         except ValueError:
-            self.notebook.select(self.tab_receiver)
-            self._process_rx_error("Média (μ) e Desvio (σ) devem ser numéricos.")
             return
 
-        framing_choice = self.combo_framing.get()
-        error_choice = self.combo_error.get()
-        mod_digital = self.combo_mod_digital.get()
-        mod_analog = self.combo_mod_analog.get()
+        framing_choice = self.tx_combos["framing"].get()
+        error_choice = self.tx_combos["error"].get()
+        mod_digital = self.tx_combos["digital"].get()
+        mod_analog = self.tx_combos["analog"].get()
 
         raw_bits = utils.string_to_bitstream(message_text)
         if raw_bits is None:
             return
 
-        # ── Pipeline enlace ──
         payloads = [raw_bits]
         if framing_choice == "Contagem de Caracteres":
             frames = enquadramento.add_character_count_framing(payloads)
@@ -590,15 +559,6 @@ class TelecomSimulatorApp:
         else:
             protected_bits = erros_core.add_hamming(framed_bits)
 
-        self.last_tx_bits = protected_bits
-        self.last_original_message = message_text
-        self.last_tx_pipeline = {
-            "raw_bits": raw_bits,
-            "framed_bits": framed_bits,
-            "protected_bits": protected_bits,
-        }
-
-        # ── Modulação ──
         digital_signal = self._encode_digital(protected_bits, mod_digital)
 
         if mod_analog == "Nenhum":
@@ -619,33 +579,22 @@ class TelecomSimulatorApp:
 
         noisy_signal = canal.inject_gaussian_noise(signal_to_send, media, desvio)
 
-        # ── Pipeline visual TX ──
         tx_steps = [
-            {
-                "num": 1, "title": "Mensagem ASCII",
-                "detail": f'Texto de entrada: "{message_text}"  ({len(message_text)} caracteres)',
-                "mono": message_text, "mono_lines": 1,
-            },
-            {
-                "num": 2, "title": "Codificação → Bitstream",
-                "detail": f"{len(raw_bits)} bits  (8 bits por caractere, MSB primeiro)",
-                "mono": self._bits_str(raw_bits), "mono_lines": 2,
-            },
-            {
-                "num": 3, "title": f"Enquadramento — {framing_choice}",
-                "detail": f"{len(raw_bits)} → {len(framed_bits)} bits  (cabeçalho, flags ou stuffing)",
-                "mono": self._bits_str(framed_bits), "mono_lines": 2,
-            },
-            {
-                "num": 4, "title": f"Resistência a Erros — {error_choice}",
-                "detail": f"{len(framed_bits)} → {len(protected_bits)} bits  (paridade, checksum, CRC ou Hamming)",
-                "mono": self._bits_str(protected_bits), "mono_lines": 2,
-            },
-            {
-                "num": 5, "title": f"Modulação Digital — {mod_digital}",
-                "detail": self._signal_stats(digital_signal),
-                "badge": f"{len(protected_bits)} bits", "badge_color": C["accent"],
-            },
+            {"num": 1, "title": "Mensagem ASCII",
+             "detail": f'Texto de entrada: "{message_text}"  ({len(message_text)} caracteres)',
+             "mono": message_text, "mono_lines": 1},
+            {"num": 2, "title": "Codificação → Bitstream",
+             "detail": f"{len(raw_bits)} bits  (8 bits/caractere, MSB primeiro)",
+             "mono": self._bits_str(raw_bits), "mono_lines": 2},
+            {"num": 3, "title": f"Enquadramento — {framing_choice}",
+             "detail": f"{len(raw_bits)} → {len(framed_bits)} bits",
+             "mono": self._bits_str(framed_bits), "mono_lines": 2},
+            {"num": 4, "title": f"Resistência a Erros — {error_choice}",
+             "detail": f"{len(framed_bits)} → {len(protected_bits)} bits",
+             "mono": self._bits_str(protected_bits), "mono_lines": 2},
+            {"num": 5, "title": f"Modulação Digital — {mod_digital}",
+             "detail": self._signal_stats(digital_signal),
+             "badge": f"{len(protected_bits)} bits", "badge_color": C["accent"]},
         ]
 
         if carrier_signal is not None:
@@ -655,115 +604,106 @@ class TelecomSimulatorApp:
                 "badge": "NRZ → onda", "badge_color": "#7c3aed",
             })
             tx_steps.append({
-                "num": 7, "title": "Canal AWGN",
-                "detail": f"Ruído gaussiano aplicado  (μ={media}, σ={desvio})  →  sinal enviado ao receptor",
+                "num": 7, "title": "Ruído + envio via socket (pickle)",
+                "detail": (
+                    f"AWGN (μ={media}, σ={desvio}) aplicado ao sinal.\n"
+                    f"Pacote serializado: sinal ({len(noisy_signal)} amostras) + "
+                    f"parâmetros de protocolo (enquadramento, EDC, modulações).\n"
+                    f"A mensagem original NÃO é enviada."
+                ),
                 "badge": tx_mode, "badge_color": C["warning"],
             })
         else:
             tx_steps.append({
-                "num": 6, "title": "Canal AWGN (banda base / cabo)",
-                "detail": f"Ruído sobre o sinal digital  (μ={media}, σ={desvio})  →  enviado ao receptor",
+                "num": 6, "title": "Ruído + envio via socket (pickle)",
+                "detail": (
+                    f"AWGN (μ={media}, σ={desvio}) sobre o sinal digital.\n"
+                    f"Pacote serializado: sinal ({len(noisy_signal)} amostras) + "
+                    f"parâmetros de protocolo (enquadramento, EDC, modulações).\n"
+                    f"A mensagem original NÃO é enviada."
+                ),
                 "badge": tx_mode, "badge_color": C["warning"],
             })
 
         self._render_pipeline_steps(self.tx_pipeline_container, tx_steps)
 
-        # ── Gráficos TX ──
         self.ax_tx_digital.clear()
         self._style_axis(
-            self.ax_tx_digital,
-            f"Sinal digital enviado — {mod_digital}",
+            self.ax_tx_digital, f"Sinal digital — {mod_digital}",
             "Amostras / posição", "Tensão (V)",
         )
-        self._plot_digital_signal(self.ax_tx_digital, digital_signal, color="#2563eb", label=mod_digital)
+        self._plot_digital_signal(self.ax_tx_digital, digital_signal, label=mod_digital)
 
         self.ax_tx_carrier.clear()
         if carrier_signal is not None:
             self._style_axis(
-                self.ax_tx_carrier,
-                f"Sinal portadora enviado — {mod_analog}",
+                self.ax_tx_carrier, f"Sinal portadora — {mod_analog}",
                 "Amostras (tempo)", "Amplitude (V)",
             )
-            self._plot_waveform(
-                self.ax_tx_carrier, carrier_signal,
-                color="#7c3aed", label=f"Portadora {mod_analog}",
-            )
+            self._plot_waveform(self.ax_tx_carrier, carrier_signal, color="#7c3aed", label=mod_analog)
             self.ax_tx_carrier.legend(loc="upper right", fontsize=8)
         else:
-            self._style_axis(
-                self.ax_tx_carrier,
-                "Modulação portadora — não utilizada",
-                "Amostras", "Amplitude (V)",
-            )
+            self._style_axis(self.ax_tx_carrier, "Modulação portadora — não utilizada", "Amostras", "Amplitude (V)")
             self.ax_tx_carrier.text(
-                0.5, 0.5,
-                "Transmissão em banda base (sem portadora)\nApenas o sinal digital é enviado",
+                0.5, 0.5, "Transmissão em banda base (sem portadora)",
                 transform=self.ax_tx_carrier.transAxes, ha="center", va="center",
                 color=C["muted"], fontsize=10,
             )
 
         self.canvas_tx.draw()
 
-        # ── Envio ──
-        payload_data = {
-            "mod_digital": mod_digital,
-            "mod_analog": mod_analog,
+        pacote = {
+            "noisy_signal": noisy_signal,
             "framing_choice": framing_choice,
             "error_choice": error_choice,
-            "clean_signal": signal_to_send,
-            "noisy_signal": noisy_signal,
+            "mod_digital": mod_digital,
+            "mod_analog": mod_analog,
             "tx_mode": tx_mode,
-            "message_original": message_text,
             "protected_bit_count": len(protected_bits),
-            "pipeline_tx": self.last_tx_pipeline,
             "media": media,
             "desvio": desvio,
         }
-        net_core.send_signal_via_socket(payload_data)
+        net_core.send_signal_via_socket(pacote)
 
-    def _process_rx_error(self, msg):
-        self.lbl_decoded_msg.config(text="Erro", foreground=C["danger"])
-        self._render_pipeline_steps(self.rx_pipeline_container, [{
-            "num": "!", "title": "Erro", "detail": msg,
-        }])
+    # ── Recepção ──────────────────────────────────────────────────────────────
 
     def _start_queue_polling(self):
         if self.gui_queue and not self.gui_queue.empty():
             try:
-                payload = self.gui_queue.get_nowait()
-                self._process_received_payload(payload)
+                pacote = self.gui_queue.get_nowait()
+                self._process_received_packet(pacote)
                 self.notebook.select(self.tab_receiver)
             except Exception as e:
                 print(f"[GUI Error] {e}")
 
         self.root.after(100, self._start_queue_polling)
 
-    def _process_received_payload(self, payload):
-        clean_signal = payload["clean_signal"]
-        noisy_signal = payload["noisy_signal"]
-        tx_mode = payload["tx_mode"]
-        mod_digital = payload["mod_digital"]
-        mod_analog = payload["mod_analog"]
-        framing_choice = payload["framing_choice"]
-        error_choice = payload["error_choice"]
-        original_msg = payload.get("message_original", self.last_original_message)
-        expected_bit_count = payload.get("protected_bit_count", len(self.last_tx_bits))
+    def _process_received_packet(self, pacote):
+        if not isinstance(pacote, dict) or "noisy_signal" not in pacote:
+            self.lbl_decoded_msg.config(text="[ pacote inválido ]", foreground=C["danger"])
+            return
 
-        self.lbl_original_msg.config(text=f'"{original_msg}"', foreground=C["text"])
+        noisy_signal = pacote["noisy_signal"]
+        if not isinstance(noisy_signal, list) or len(noisy_signal) == 0:
+            self.lbl_decoded_msg.config(text="[ sinal inválido ]", foreground=C["danger"])
+            return
 
-        # ── 1. Demodulação física ──
+        framing_choice = pacote["framing_choice"]
+        error_choice = pacote["error_choice"]
+        mod_digital = pacote["mod_digital"]
+        mod_analog = pacote["mod_analog"]
+        tx_mode = pacote["tx_mode"]
+        bit_count = pacote.get("protected_bit_count", len(noisy_signal))
+
+        self._update_rx_protocol_info(pacote)
+
+        # 1. Demodulação física (parâmetros vindos do pacote pickle)
         rx_bits_full = self._decode_physical_bits(noisy_signal, tx_mode, mod_digital, mod_analog)
-        rx_bits = rx_bits_full[:expected_bit_count]
-        while len(rx_bits) < expected_bit_count:
+        rx_bits = rx_bits_full[:bit_count]
+        while len(rx_bits) < bit_count:
             rx_bits.append(False)
 
-        min_len = min(len(self.last_tx_bits), len(rx_bits))
-        bit_errors = sum(
-            1 for a, b in zip(self.last_tx_bits[:min_len], rx_bits[:min_len]) if a != b
-        )
-        ber_pct = (bit_errors / min_len * 100) if min_len else 0
-
-        # ── 2. EDC ──
+        # 2. EDC
         edc_corrected = False
         if error_choice == "Bit de Paridade Par":
             after_edc, edc_error = erros_core.verify_and_remove_even_parity(rx_bits)
@@ -775,7 +715,7 @@ class TelecomSimulatorApp:
             after_edc, edc_error = erros_core.verify_and_correct_hamming(list(rx_bits))
             edc_corrected = edc_error and error_choice == "Código de Hamming"
 
-        # ── 3. Desenquadramento ──
+        # 3. Desenquadramento
         if framing_choice == "Contagem de Caracteres":
             raw_payloads = enquadramento.remove_character_count_framing([after_edc])
         elif framing_choice == "Inserção de Bytes":
@@ -787,71 +727,74 @@ class TelecomSimulatorApp:
         for rp in raw_payloads:
             payload_bits.extend(rp)
 
-        # Remove padding de byte alignment (zeros finais do enquadramento)
-        raw_original = self.last_tx_pipeline.get("raw_bits", [])
-        if raw_original and len(payload_bits) >= len(raw_original):
-            final_bits = payload_bits[:len(raw_original)]
-        else:
-            final_bits = payload_bits
-            remainder = len(final_bits) % 8
-            if remainder:
-                final_bits = final_bits[:-remainder]
+        final_bits = self._trim_trailing_padding_bits(payload_bits)
+        remainder = len(final_bits) % 8
+        if remainder:
+            final_bits = final_bits[:-remainder]
 
         final_text = utils.bitstream_to_string(final_bits) if final_bits else None
 
-        # ── Status lateral ──
-        self.lbl_ber.config(
-            text=f"BER físico: {bit_errors}/{min_len} bits  ({ber_pct:.1f}%)"
-        )
+        # ── Status ──
+        self.lbl_rx_signal.config(text=f"Sinal recebido: {self._signal_stats(noisy_signal)}")
 
         if edc_error:
             if edc_corrected:
-                self.lbl_edc.config(text=f"EDC ({error_choice}): erro corrigido ✓", fg=C["warning"])
+                self.lbl_edc.config(
+                    text=f"EDC ({error_choice}): erro de 1 bit corrigido",
+                    fg=C["warning"],
+                )
             else:
-                self.lbl_edc.config(text=f"EDC ({error_choice}): inconsistência detectada ✗", fg=C["danger"])
+                self.lbl_edc.config(
+                    text=f"EDC ({error_choice}): inconsistência detectada — possível corrupção",
+                    fg=C["danger"],
+                )
         else:
-            self.lbl_edc.config(text=f"EDC ({error_choice}): integridade OK ✓", fg=C["success"])
+            self.lbl_edc.config(text=f"EDC ({error_choice}): bloco íntegro", fg=C["success"])
 
-        messages_match = final_text == original_msg
-        if final_text is None:
-            self.lbl_decoded_msg.config(text="[ ilegível ]", foreground=C["danger"])
-            self.lbl_match.config(text="Integridade: falha na decodificação", fg=C["danger"])
-        elif messages_match:
-            self.lbl_decoded_msg.config(text=f'"{final_text}"', foreground=C["success"])
-            self.lbl_match.config(text="Integridade: mensagem recuperada com sucesso ✓", fg=C["success"])
-        else:
+        if final_text is None or not final_text.strip():
+            self.lbl_decoded_msg.config(text="[ ilegível / corrompido ]", foreground=C["danger"])
+            self.lbl_decode.config(
+                text="Decodificação: falha — payload não-ASCII ou vazio",
+                fg=C["danger"],
+            )
+        elif edc_error and not edc_corrected:
             self.lbl_decoded_msg.config(text=f'"{final_text}"', foreground=C["warning"])
-            self.lbl_match.config(text="Integridade: mensagem corrompida ✗", fg=C["danger"])
+            self.lbl_decode.config(
+                text="Decodificação: texto parcial (EDC reportou corrupção)",
+                fg=C["warning"],
+            )
+        else:
+            self.lbl_decoded_msg.config(text=f'"{final_text}"', foreground=C["success"])
+            self.lbl_decode.config(text="Decodificação: ASCII recuperado com sucesso", fg=C["success"])
 
-        self._update_diff_view(original_msg, final_text or "")
-
-        # ── Pipeline visual RX ──
+        # ── Pipeline RX ──
         rx_steps = [
             {
-                "num": 1,
-                "title": f"Recepção no canal ({tx_mode})",
+                "num": 1, "title": "Pacote recebido via socket (pickle)",
                 "detail": (
-                    f"Sinal recebido com ruído AWGN  (μ={payload.get('media', 0)}, "
-                    f"σ={payload.get('desvio', 0)})\n{self._signal_stats(noisy_signal)}"
+                    f"Desserializado na thread do servidor TCP.\n"
+                    f"Sinal: {self._signal_stats(noisy_signal)}\n"
+                    f"Protocolo: {framing_choice} | {error_choice} | "
+                    f"{mod_digital} | {mod_analog} | {tx_mode}"
                 ),
-                "badge": f"{bit_errors} erros físicos", "badge_color": C["danger"] if bit_errors else C["success"],
+                "badge": f"{len(noisy_signal)} amostras", "badge_color": C["accent"],
             },
             {
-                "num": 2,
-                "title": "Demodulação física",
+                "num": 2, "title": f"Demodulação física — {mod_digital}"
+                + (f" + portadora {mod_analog}" if tx_mode == "Ar" else ""),
                 "detail": (
-                    f"{'Portadora ' + mod_analog + ' → NRZ → ' if tx_mode == 'Ar' else ''}"
-                    f"Modulação digital {mod_digital} → {len(rx_bits)} bits recuperados"
+                    f"Parâmetros lidos do pacote (não configurados localmente).\n"
+                    + (f"{mod_analog} → NRZ → " if tx_mode == "Ar" else "")
+                    + f"{mod_digital} → {len(rx_bits)} bits recuperados"
                 ),
                 "mono": self._bits_str(rx_bits), "mono_lines": 2,
             },
             {
-                "num": 3,
-                "title": f"Verificação EDC — {error_choice}",
+                "num": 3, "title": f"Verificação EDC — {error_choice}",
                 "detail": (
                     ("Erro detectado e corrigido (Hamming)." if edc_corrected else
-                     "Inconsistência detectada — bloco possivelmente corrompido." if edc_error else
-                     "Bloco validado com sucesso.")
+                     "Inconsistência detectada — dados possivelmente corrompidos." if edc_error else
+                     "Integridade validada com sucesso.")
                     + f"\n{len(rx_bits)} → {len(after_edc)} bits (EDC removido)"
                 ),
                 "badge": "corrigido" if edc_corrected else ("falha" if edc_error else "OK"),
@@ -859,32 +802,22 @@ class TelecomSimulatorApp:
                 "mono": self._bits_str(after_edc), "mono_lines": 2,
             },
             {
-                "num": 4,
-                "title": f"Desenquadramento — {framing_choice}",
-                "detail": f"{len(after_edc)} → {len(payload_bits)} bits  (cabeçalho/flags removidos)",
+                "num": 4, "title": f"Desenquadramento — {framing_choice}",
+                "detail": f"{len(after_edc)} → {len(payload_bits)} bits  (headers/flags removidos)",
                 "mono": self._bits_str(payload_bits), "mono_lines": 2,
             },
             {
-                "num": 5,
-                "title": "Decodificação ASCII",
+                "num": 5, "title": "Decodificação ASCII",
                 "detail": (
-                    f'Payload útil: {len(final_bits)} bits\n'
-                    f'Texto recuperado: "{final_text}"' if final_text else
-                    "Não foi possível decodificar texto ASCII válido."
+                    f"Payload útil: {len(final_bits)} bits\n"
+                    + (f'Texto recuperado: "{final_text}"' if final_text
+                       else "Falha — sequência não representa ASCII válido.")
                 ),
                 "mono": self._bits_str(final_bits), "mono_lines": 2,
-            },
-            {
-                "num": 6,
-                "title": "Comparação final",
-                "detail": (
-                    f'Original:  "{original_msg}"\n'
-                    f'Recebido:  "{final_text or "[vazio]"}"\n'
-                    + ("Mensagens idênticas." if messages_match else
-                       f"Divergência em {sum(1 for a, b in zip(original_msg, final_text or '') if a != b)} caractere(s).")
+                "badge": "corrompido" if (edc_error and not edc_corrected) else ("OK" if final_text else "falha"),
+                "badge_color": C["danger"] if (edc_error and not edc_corrected) else (
+                    C["success"] if final_text else C["warning"]
                 ),
-                "badge": "OK" if messages_match else "CORROMPIDO",
-                "badge_color": C["success"] if messages_match else C["danger"],
             },
         ]
         self._render_pipeline_steps(self.rx_pipeline_container, rx_steps)
@@ -892,9 +825,9 @@ class TelecomSimulatorApp:
         # ── Gráficos RX ──
         self.ax_rx_signal.clear()
         self._style_axis(self.ax_rx_signal, "", "Amostras", "Amplitude")
-        self._plot_rx_signal_overlay(self.ax_rx_signal, clean_signal, noisy_signal, tx_mode, mod_analog)
+        self._plot_received_signal(self.ax_rx_signal, noisy_signal, tx_mode, mod_analog)
 
         self.ax_rx_decoded.clear()
-        self._plot_decoded_bits(self.ax_rx_decoded, self.last_tx_bits, rx_bits)
+        self._plot_decoded_bits(self.ax_rx_decoded, rx_bits)
 
         self.canvas_rx.draw()

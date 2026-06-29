@@ -2,25 +2,35 @@ import socket
 import pickle
 import queue
 
-# Standard network settings for local simulation
-HOST = '127.0.0.1'  # localhost
-PORT = 5000        # Communication port
+HOST = "127.0.0.1"
+PORT = 5000
 
-def send_signal_via_socket(signal_data: list[float] | list[int]):
+# Chaves do pacote serializado (pickle) enviado pelo transmissor ao receptor.
+# Contém o sinal corrompido + parâmetros de protocolo para o processo reverso.
+# NÃO inclui mensagem original, bitstream bruto nem sinal limpo de referência.
+PACOTE_CHAVES = (
+    "noisy_signal",
+    "framing_choice",
+    "error_choice",
+    "mod_digital",
+    "mod_analog",
+    "tx_mode",
+    "protected_bit_count",
+    "media",
+    "desvio",
+)
+
+
+def send_signal_via_socket(pacote: dict):
     """
-    Transmitter side (Client): Opens a temporary socket, connects to the 
-    background server, serializes the signal list using pickle, and transmits it.
+    Transmissor (cliente TCP): serializa via pickle um pacote com o sinal recebido
+    pelo canal AWGN e os parâmetros de protocolo necessários ao processo reverso
+    no receptor (enquadramento, EDC, modulações).
     """
     try:
-        # Create a standard TCP Socket
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((HOST, PORT))
-        
-        # Serialize the numeric signal array (with or without noise) into raw bytes
-        serialized_data = pickle.dumps(signal_data)
-        
-        # Send everything through the pipe
-        client_socket.sendall(serialized_data)
+        client_socket.sendall(pickle.dumps(pacote))
         client_socket.close()
     except Exception as e:
         print(f"[Transmitter Error] Failed to send data via socket: {e}")
@@ -28,38 +38,31 @@ def send_signal_via_socket(signal_data: list[float] | list[int]):
 
 def run_receptor_server(gui_queue: queue.Queue):
     """
-    Receiver side (Server): This function runs inside a background Daemon Thread.
-    It blocks on listen mode waiting for incoming signal data chunks from the socket.
-    When data arrives, it deserializes it and drops it inside the GUI queue thread-safely.
+    Receptor (servidor TCP): roda em thread separada (daemon), desserializa o
+    pacote pickle e o repassa à GUI via fila thread-safe.
     """
-    # Create and bind the server socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # SO_REUSEADDR prevents the "Address already in use" error when restarting the app fast
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
     server_socket.bind((HOST, PORT))
     server_socket.listen(1)
     print(f"[Receiver Server] Listening on {HOST}:{PORT} in background thread...")
 
     while True:
         try:
-            # Code blocks here waiting for the transmitter connection (Thread safe!)
             connection, address = server_socket.accept()
-            
+            print(f"[Receiver Server] Conexão de {address}")
+
             data_buffer = b""
             while True:
                 packet = connection.recv(4096)
                 if not packet:
                     break
                 data_buffer += packet
-                
+
             if data_buffer:
-                # Reconstruct the original Python list of numbers out of raw network bytes
-                received_signal = pickle.loads(data_buffer)
-                
-                # Push the data safely into the queue so the Tkinter UI thread can read it
-                gui_queue.put(received_signal)
-                
+                pacote = pickle.loads(data_buffer)
+                gui_queue.put(pacote)
+
             connection.close()
         except Exception as e:
             print(f"[Receiver Server Error] Exception during socket loop: {e}")
