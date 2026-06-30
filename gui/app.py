@@ -125,13 +125,6 @@ class TelecomSimulatorApp:
             return "vazio"
         return f"{len(arr)} amostras  |  min={arr.min():.2f}  max={arr.max():.2f}  média={arr.mean():.3f}"
 
-    @staticmethod
-    def _trim_trailing_padding_bits(bits: list[bool]) -> list[bool]:
-        trimmed = list(bits)
-        while trimmed and not trimmed[-1]:
-            trimmed.pop()
-        return trimmed
-
     def _make_scrollable(self, parent):
         outer = ttk.Frame(parent)
         canvas = tk.Canvas(outer, bg=C["bg"], highlightthickness=0)
@@ -250,7 +243,7 @@ class TelecomSimulatorApp:
         return combos
 
     def _update_rx_protocol_info(self, pacote: dict):
-        """Exibe parâmetros recebidos via pickle (somente leitura)."""
+        """Exibe parâmetros recebidos"""
         linhas = [
             f"Enquadramento: {pacote['framing_choice']}",
             f"EDC: {pacote['error_choice']}",
@@ -727,7 +720,9 @@ class TelecomSimulatorApp:
         for rp in raw_payloads:
             payload_bits.extend(rp)
 
-        final_bits = self._trim_trailing_padding_bits(payload_bits)
+        # Não remover zeros finais — muitos caracteres ASCII terminam em 0 (ex.: 'b' = 01100010).
+        # O desenquadramento já delimita o payload; só descartamos byte incompleto no final.
+        final_bits = list(payload_bits)
         remainder = len(final_bits) % 8
         if remainder:
             final_bits = final_bits[:-remainder]
