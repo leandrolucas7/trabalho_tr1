@@ -46,7 +46,7 @@ class TelecomSimulatorApp:
     def __init__(self, root):
         """Cria a janela principal, aplica o tema visual, monta as abas e inicia a leitura assíncrona da fila do receptor."""
         self.root = root
-        self.root.title("Simulador de Comunicação — Camada Física e Enlace")
+        self.root.title("Mayday - Simulador OSI")
         self.root.geometry("1500x920")
         self.root.minsize(1280, 780)
 
@@ -278,7 +278,7 @@ class TelecomSimulatorApp:
         paned.add(ctrl_outer, weight=0)
 
         ttk.Label(ctrl_outer, text="Mensagem:").pack(anchor="w")
-        self.entry_message = self._make_entry(ctrl_outer, width=32, initial="Ola!")
+        self.entry_message = self._make_entry(ctrl_outer, width=32, initial="Rumo ao Hexa!")
         self.entry_message.pack(fill="x", pady=(2, 10))
 
         self.tx_combos = self._add_protocol_combos(ctrl_outer)
