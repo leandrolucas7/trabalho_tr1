@@ -1,31 +1,27 @@
 import numpy as np
 
 def encode_ask(digital_signal: list[int], samples_per_bit: int = 100, cycles_per_bit: int = 2, amplitude: float = 1.0) -> list[float]:
-    """
-    Transmitter side: Modulates a digital signal into an Amplitude Shift Keying (ASK) wave.
-    - +1 (High) -> Sinusoidal wave with full amplitude
-    - -1 (Low)  -> Zero amplitude (0.0 / silence)
-    """
+    """Modula um sinal digital em ASK, ligando a portadora quando o nível é alto e anulando quando é baixo."""
     wave_signal = []
     
+    # Gera uma senoide de referência para um bit inteiro.
     t = np.linspace(0, cycles_per_bit, samples_per_bit, endpoint=False)
     sine_carrier = amplitude * np.sin(2 * np.pi * t)
     
     for level in digital_signal:
-        if level > 0: # +1
+        if level > 0:  # Nível alto: transmite a portadora.
             wave_signal.extend(sine_carrier.tolist())
-        else:         # -1
+        else:          # Nível baixo: transmite silêncio.
             wave_signal.extend([0.0] * samples_per_bit)
             
     return wave_signal
 
 
 def decode_ask(wave_signal: list[float], samples_per_bit: int = 100, amplitude: float = 1.0) -> list[int]:
-    """
-    Receiver side: Demodulates an ASK wave signal back into a digital signal (+1 or -1).
-    """
+    """Demodula ASK usando energia RMS para distinguir portadora presente de ausência de sinal."""
     digital_signal = []
     
+    # Calcula o RMS ideal da portadora e define um limiar simples de decisão.
     ideal_rms = amplitude / np.sqrt(2)
     decision_threshold = ideal_rms / 2
     
@@ -37,20 +33,17 @@ def decode_ask(wave_signal: list[float], samples_per_bit: int = 100, amplitude: 
         segment_arr = np.array(bit_segment)
         rms_energy = np.sqrt(np.mean(segment_arr ** 2))
         
-        # Returns +1 if signal is strong, -1 if it's silence
+        # Se a energia ficar acima do limiar, interpreta como bit alto; caso contrário, bit baixo.
         digital_signal.append(1 if rms_energy > decision_threshold else -1)
         
     return digital_signal
 
 
 def encode_fsk(digital_signal: list[int], samples_per_bit: int = 100) -> list[float]:
-    """
-    Transmitter side: Modulates a digital signal into a Frequency Shift Keying (FSK) wave.
-    - +1 (High) -> High Frequency (4 cycles)
-    - -1 (Low)  -> Low Frequency (1 cycle)
-    """
+    """Modula um sinal digital em FSK, alternando entre duas frequências diferentes."""
     wave_signal = []
     
+    # Cada bit recebe um trecho de mesmo comprimento, mas com frequência diferente.
     t = np.linspace(0, 1, samples_per_bit, endpoint=False)
     
     low_freq_carrier = np.sin(2 * np.pi * 1 * t)
@@ -66,9 +59,7 @@ def encode_fsk(digital_signal: list[int], samples_per_bit: int = 100) -> list[fl
 
 
 def decode_fsk(wave_signal: list[float], samples_per_bit: int = 100) -> list[int]:
-    """
-    Receiver side: Demodulates an FSK wave signal back into a digital signal (+1 or -1).
-    """
+    """Demodula FSK contando cruzamentos por zero para identificar a frequência dominante."""
     digital_signal = []
     
     for i in range(0, len(wave_signal), samples_per_bit):
@@ -81,21 +72,20 @@ def decode_fsk(wave_signal: list[float], samples_per_bit: int = 100) -> list[int
             if bit_segment[idx] * bit_segment[idx - 1] < 0:
                 crossings += 1
                 
+        # Mais cruzamentos por zero indicam a frequência alta; menos cruzamentos indicam a baixa.
         digital_signal.append(1 if crossings > 5 else -1)
         
     return digital_signal
 
 
 def encode_qpsk(digital_signal: list[int], samples_per_bit: int = 100) -> list[float]:
-    """
-    Transmitter side: Modulates a digital signal into a QPSK wave signal.
-    Directly multiplies the voltage levels (+1, -1) by the orthogonal carriers.
-    """
-    # Pad with -1 (equivalent to False) if odd number of elements
+    """Modula pares de bits em QPSK, usando componentes ortogonais I e Q."""
+    # Completa com -1 caso exista quantidade ímpar de símbolos para manter o pareamento.
     if len(digital_signal) % 2 != 0:
         digital_signal = digital_signal + [-1]
         
     wave_signal = []
+    # Gera as portadoras ortogonais para I e Q.
     t = np.linspace(0, 1, samples_per_bit, endpoint=False)
     
     carrier_i = np.cos(2 * np.pi * 2 * t)
@@ -105,7 +95,7 @@ def encode_qpsk(digital_signal: list[int], samples_per_bit: int = 100) -> list[f
         level_i = digital_signal[i]
         level_q = digital_signal[i + 1]
         
-        # Mathematical beauty: direct multiplication of voltage by carrier!
+        # Cada par de níveis modula diretamente as portadoras em fase e em quadratura.
         dibit_wave = (level_i * carrier_i) + (level_q * carrier_q)
         wave_signal.extend(dibit_wave.tolist())
         
@@ -113,10 +103,9 @@ def encode_qpsk(digital_signal: list[int], samples_per_bit: int = 100) -> list[f
 
 
 def decode_qpsk(wave_signal: list[float], samples_per_bit: int = 100) -> list[int]:
-    """
-    Receiver side: Demodulates a QPSK wave signal back into a digital signal (+1 or -1).
-    """
+    """Demodula QPSK recuperando os componentes I e Q por correlação com as portadoras de referência."""
     digital_signal = []
+    # Usa as mesmas referências do transmissor para medir a energia projetada em I e Q.
     t = np.linspace(0, 1, samples_per_bit, endpoint=False)
     
     ref_i = np.cos(2 * np.pi * 2 * t)
@@ -129,6 +118,7 @@ def decode_qpsk(wave_signal: list[float], samples_per_bit: int = 100) -> list[in
             
         segment_arr = np.array(segment)
         
+        # Calcula quanto do sinal recebido “bate” com cada eixo da modulação.
         recovered_i = np.sum(segment_arr * ref_i) / (samples_per_bit / 2)
         recovered_q = np.sum(segment_arr * ref_q) / (samples_per_bit / 2)
         
@@ -139,20 +129,20 @@ def decode_qpsk(wave_signal: list[float], samples_per_bit: int = 100) -> list[in
 
 
 def encode_16qam(digital_signal: list[int], samples_per_bit: int = 100) -> list[float]:
-    """
-    Transmitter side: Modulates a digital signal into a 16-QAM wave signal.
-    """
+    """Modula quatro bits por símbolo em 16-QAM, mapeando combinações binárias para níveis de amplitude."""
     remainder = len(digital_signal) % 4
     if remainder != 0:
+        # Completa com -1 para que a quantidade de bits seja múltipla de 4.
         digital_signal = digital_signal + ([-1] * (4 - remainder))
         
     wave_signal = []
+    # Usa as mesmas portadoras ortogonais do QPSK como base do 16-QAM.
     t = np.linspace(0, 1, samples_per_bit, endpoint=False)
     
     carrier_i = np.cos(2 * np.pi * 2 * t)
     carrier_q = np.sin(2 * np.pi * 2 * t)
     
-    # Map for digital voltage combinations (-1 and 1) to 16-QAM amplitude levels
+    # Mapeia combinações de dois bits para níveis de amplitude em I e Q.
     level_map = {
         (-1, -1): -3.0,
         (-1,  1): -1.0,
@@ -166,6 +156,7 @@ def encode_16qam(digital_signal: list[int], samples_per_bit: int = 100) -> list[
         amp_i = level_map[(v1, v2)]
         amp_q = level_map[(v3, v4)]
         
+        # Combina os dois pares de bits em uma única forma de onda de 16-QAM.
         quadbit_wave = (amp_i * carrier_i) + (amp_q * carrier_q)
         wave_signal.extend(quadbit_wave.tolist())
         
@@ -173,15 +164,15 @@ def encode_16qam(digital_signal: list[int], samples_per_bit: int = 100) -> list[
 
 
 def decode_16qam(wave_signal: list[float], samples_per_bit: int = 100) -> list[int]:
-    """
-    Receiver side: Demodulates a 16-QAM wave signal back into a digital signal (+1 or -1).
-    """
+    """Demodula 16-QAM estimando os níveis de amplitude em I e Q e convertendo-os em pares de bits."""
     digital_signal = []
+    # Recria as referências usadas na modulação para medir as projeções de I e Q.
     t = np.linspace(0, 1, samples_per_bit, endpoint=False)
     
     ref_i = np.cos(2 * np.pi * 2 * t)
     ref_q = np.sin(2 * np.pi * 2 * t)
     
+    # Converte o valor estimado em cada eixo de volta para um par de bits.
     def slice_level(value: float) -> list[int]:
         if value < -2.0:
             return [-1, -1]

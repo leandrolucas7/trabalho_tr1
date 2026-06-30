@@ -44,6 +44,7 @@ ANALOG_VALUES = ["Nenhum", "ASK", "FSK", "QPSK", "16-QAM"]
 
 class TelecomSimulatorApp:
     def __init__(self, root):
+        """Cria a janela principal, aplica o tema visual, monta as abas e inicia a leitura assíncrona da fila do receptor."""
         self.root = root
         self.root.title("Simulador de Comunicação — Camada Física e Enlace")
         self.root.geometry("1500x920")
@@ -68,6 +69,7 @@ class TelecomSimulatorApp:
     # ── Tema ──────────────────────────────────────────────────────────────────
 
     def _apply_theme(self):
+        """Configura o tema visual do Tkinter e padroniza a aparência dos widgets."""
         self.style = ttk.Style()
         self.style.theme_use("clam")
         self.root.configure(bg=C["bg"])
@@ -96,7 +98,7 @@ class TelecomSimulatorApp:
         self.style.configure("TCombobox", font=("Segoe UI", 10))
 
     def _make_entry(self, parent, width=30, initial=""):
-        """tk.Entry com cursor visível no macOS (ttk.Entry costuma ocultá-lo)."""
+        """Cria um campo de texto simples com estilo consistente e cursor visível."""
         entry = tk.Entry(
             parent, width=width, font=("Segoe UI", 10),
             bg=C["entry_bg"], fg=C["text"],
@@ -113,6 +115,7 @@ class TelecomSimulatorApp:
 
     @staticmethod
     def _bits_str(bits: list[bool], max_len: int = 64) -> str:
+        """Converte uma lista de bits em uma string compacta de 0 e 1 para exibição na interface."""
         s = "".join("1" if b else "0" for b in bits)
         if len(s) > max_len:
             return s[:max_len] + f"…  (+{len(s) - max_len} bits)"
@@ -120,12 +123,14 @@ class TelecomSimulatorApp:
 
     @staticmethod
     def _signal_stats(signal) -> str:
+        """Resume um sinal numérico informando quantidade de amostras e estatísticas básicas."""
         arr = np.array(signal, dtype=float)
         if len(arr) == 0:
             return "vazio"
         return f"{len(arr)} amostras  |  min={arr.min():.2f}  max={arr.max():.2f}  média={arr.mean():.3f}"
 
     def _make_scrollable(self, parent):
+        """Cria um container com rolagem vertical para listas de etapas ou blocos longos."""
         outer = ttk.Frame(parent)
         canvas = tk.Canvas(outer, bg=C["bg"], highlightthickness=0)
         vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
@@ -137,12 +142,18 @@ class TelecomSimulatorApp:
         vsb.pack(side="right", fill="y")
 
         def _on_mousewheel(event):
+            """Desloca a área rolável com base na direção e intensidade da roda do mouse."""
+            # Ajusta o deslocamento da rolagem conforme o movimento da roda do mouse.
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
         def _bind_wheel(_event):
+            """Ativa a captura global da roda do mouse enquanto o ponteiro estiver sobre a área rolável."""
+            # Ativa a captura da roda do mouse quando o ponteiro entra na área rolável.
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         def _unbind_wheel(_event):
+            """Desativa a captura global da roda do mouse quando o ponteiro sai da área rolável."""
+            # Remove a captura ao sair da área para não interferir em outros widgets.
             canvas.unbind_all("<MouseWheel>")
 
         canvas.bind("<Enter>", _bind_wheel)
@@ -150,6 +161,7 @@ class TelecomSimulatorApp:
         return outer, inner
 
     def _render_pipeline_steps(self, container, steps: list[dict]):
+        """Desenha a sequência de etapas do pipeline em cartões visuais com texto explicativo."""
         for widget in container.winfo_children():
             widget.destroy()
 
@@ -197,7 +209,7 @@ class TelecomSimulatorApp:
                 tk.Label(container, text="▼", bg=C["bg"], fg=C["arrow"], font=("Segoe UI", 11)).pack(pady=2)
 
     def _add_protocol_combos(self, parent):
-        """Comboboxes de protocolo — apenas no transmissor."""
+        """Cria e organiza os seletores de protocolo usados apenas no painel do transmissor."""
         combos = {}
 
         ttk.Label(parent, text="Enquadramento:").pack(anchor="w")
@@ -227,6 +239,7 @@ class TelecomSimulatorApp:
         combos["lock_lbl"] = lock_lbl
 
         def on_analog_change(_event=None):
+            """Sincroniza o estado da modulação digital com a escolha da modulação portadora."""
             if combos["analog"].get() == "Nenhum":
                 combos["digital"].config(state="readonly")
                 lock_lbl.config(text="")
@@ -243,7 +256,7 @@ class TelecomSimulatorApp:
         return combos
 
     def _update_rx_protocol_info(self, pacote: dict):
-        """Exibe parâmetros recebidos"""
+        """Atualiza a área lateral com os parâmetros de protocolo recebidos pelo receptor."""
         linhas = [
             f"Enquadramento: {pacote['framing_choice']}",
             f"EDC: {pacote['error_choice']}",
@@ -257,6 +270,7 @@ class TelecomSimulatorApp:
     # ── Aba Transmissor ───────────────────────────────────────────────────────
 
     def _setup_transmitter_tab(self):
+        """Monta o painel do transmissor com entrada de mensagem, seletores de protocolo, ruído e gráficos."""
         paned = ttk.PanedWindow(self.tab_transmitter, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -313,6 +327,7 @@ class TelecomSimulatorApp:
     # ── Aba Receptor ──────────────────────────────────────────────────────────
 
     def _setup_receiver_tab(self):
+        """Monta o painel do receptor, exibindo a mensagem recuperada, estatísticas e gráficos de recepção."""
         paned = ttk.PanedWindow(self.tab_receiver, orient="horizontal")
         paned.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -326,6 +341,7 @@ class TelecomSimulatorApp:
             proto_frame,
             text="Aguardando pacote via socket…",
             foreground=C["muted"], font=("Segoe UI", 9), justify="left",
+            wraplength=250,
         )
         self.lbl_rx_protocol.pack(anchor="w")
 
@@ -336,6 +352,7 @@ class TelecomSimulatorApp:
         self.lbl_decoded_msg = ttk.Label(
             status_frame, text="Aguardando sinal…",
             font=("Courier New", 13, "bold"), foreground=C["muted"],
+            wraplength=250, justify="left",
         )
         self.lbl_decoded_msg.pack(anchor="w", pady=(4, 10))
 
@@ -344,16 +361,19 @@ class TelecomSimulatorApp:
         self.lbl_rx_signal = tk.Label(
             info, text="Sinal recebido: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9), anchor="w", padx=10, pady=4,
+            wraplength=250, justify="left",
         )
         self.lbl_rx_signal.pack(fill="x")
         self.lbl_edc = tk.Label(
             info, text="EDC: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9), anchor="w", padx=10, pady=4,
+            wraplength=250, justify="left",
         )
         self.lbl_edc.pack(fill="x")
         self.lbl_decode = tk.Label(
             info, text="Decodificação: —", bg=C["step_bg"], fg=C["text"],
             font=("Segoe UI", 9, "bold"), anchor="w", padx=10, pady=4,
+            wraplength=250, justify="left",
         )
         self.lbl_decode.pack(fill="x")
 
@@ -387,6 +407,7 @@ class TelecomSimulatorApp:
     # ── Gráficos ──────────────────────────────────────────────────────────────
 
     def _style_axis(self, ax, title, xlabel, ylabel):
+        """Aplica o estilo visual padrão a um eixo do Matplotlib."""
         ax.set_facecolor(C["plot_bg"])
         ax.set_title(title, fontsize=10, fontweight="bold", color=C["text"], pad=8)
         ax.set_xlabel(xlabel, fontsize=9, color=C["muted"])
@@ -397,6 +418,7 @@ class TelecomSimulatorApp:
             spine.set_color(C["border"])
 
     def _clear_tx_plots(self):
+        """Limpa os gráficos do transmissor e exibe mensagens de estado vazio."""
         self.ax_tx_digital.clear()
         self._style_axis(self.ax_tx_digital, "Modulação Digital (banda base)", "Amostras", "Tensão (V)")
         self.ax_tx_digital.text(
@@ -413,6 +435,7 @@ class TelecomSimulatorApp:
         self.canvas_tx.draw()
 
     def _clear_rx_plots(self):
+        """Limpa os gráficos do receptor e exibe mensagens de aguardando dados."""
         self.ax_rx_signal.clear()
         self._style_axis(self.ax_rx_signal, "Sinal recebido via socket", "Amostras", "Amplitude")
         self.ax_rx_signal.text(
@@ -428,6 +451,7 @@ class TelecomSimulatorApp:
         self.canvas_rx.draw()
 
     def _plot_digital_signal(self, ax, signal, color="#2563eb", label="Sinal digital", max_pts=300):
+        """Plota um sinal digital em formato de degrau para facilitar a leitura dos bits."""
         sig = signal[:max_pts]
         ax.step(np.arange(len(sig)), sig, where="post", color=color, lw=1.8, label=label, alpha=0.9)
         if len(signal) > max_pts:
@@ -440,6 +464,7 @@ class TelecomSimulatorApp:
             ax.set_ylim(min(sig) - margin, max(sig) + margin)
 
     def _plot_waveform(self, ax, signal, color="#2563eb", label="Sinal", max_pts=2000, step=False):
+        """Plota uma forma de onda contínua ou em degrau, dependendo do contexto."""
         sig = signal[:max_pts]
         x = np.arange(len(sig))
         if step:
@@ -454,6 +479,7 @@ class TelecomSimulatorApp:
             )
 
     def _plot_received_signal(self, ax, noisy_signal, tx_mode, mod_analog):
+        """Plota o sinal recebido pelo receptor, ajustando o tipo de visualização conforme o meio de transmissão."""
         max_pts = 250 if tx_mode == "Cabo" else 2000
         step = tx_mode == "Cabo"
         self._plot_waveform(
@@ -468,6 +494,7 @@ class TelecomSimulatorApp:
         )
 
     def _plot_decoded_bits(self, ax, rx_bits, max_bits=120):
+        """Mostra os bits decodificados na camada física para comparação visual com a recepção."""
         n = min(len(rx_bits), max_bits)
         rx_trim = rx_bits[:n]
         rx_int = [1 if b else 0 for b in rx_trim]
@@ -486,6 +513,7 @@ class TelecomSimulatorApp:
     # ── Codificação / decodificação ───────────────────────────────────────────
 
     def _encode_digital(self, bits, mod_digital):
+        """Encaminha o bitstream para a função de codificação digital escolhida na interface."""
         if mod_digital == "NRZ-Polar":
             return digital_core.encode_nrz_polar(bits)
         if mod_digital == "Manchester":
@@ -493,6 +521,7 @@ class TelecomSimulatorApp:
         return digital_core.encode_bipolar(bits)
 
     def _decode_physical_bits(self, noisy_signal, tx_mode, mod_digital, mod_analog):
+        """Executa a etapa inversa da camada física, escolhendo a decodificação correta para o meio usado."""
         if tx_mode == "Cabo":
             if mod_digital == "NRZ-Polar":
                 return digital_core.decode_nrz_polar(noisy_signal)
@@ -514,6 +543,7 @@ class TelecomSimulatorApp:
     # ── Transmissão ───────────────────────────────────────────────────────────
 
     def _on_transmit_clicked(self):
+        """Executa o pipeline completo do transmissor: converte texto, enquadra, protege, modula, aplica ruído e envia."""
         message_text = self.entry_message.get()
         if not message_text:
             return
@@ -661,6 +691,7 @@ class TelecomSimulatorApp:
     # ── Recepção ──────────────────────────────────────────────────────────────
 
     def _start_queue_polling(self):
+        """Verifica periodicamente a fila compartilhada para processar pacotes recebidos pelo servidor."""
         if self.gui_queue and not self.gui_queue.empty():
             try:
                 pacote = self.gui_queue.get_nowait()
@@ -672,6 +703,7 @@ class TelecomSimulatorApp:
         self.root.after(100, self._start_queue_polling)
 
     def _process_received_packet(self, pacote):
+        """Processa o pacote recebido, executando a recepção, a verificação de erros e a atualização visual da interface."""
         if not isinstance(pacote, dict) or "noisy_signal" not in pacote:
             self.lbl_decoded_msg.config(text="[ pacote inválido ]", foreground=C["danger"])
             return
@@ -690,13 +722,13 @@ class TelecomSimulatorApp:
 
         self._update_rx_protocol_info(pacote)
 
-        # 1. Demodulação física (parâmetros vindos do pacote pickle)
+        # 1. Demodulação física com os parâmetros que vieram no pacote serializado.
         rx_bits_full = self._decode_physical_bits(noisy_signal, tx_mode, mod_digital, mod_analog)
         rx_bits = rx_bits_full[:bit_count]
         while len(rx_bits) < bit_count:
             rx_bits.append(False)
 
-        # 2. EDC
+        # 2. Verificação e correção de erros da camada de enlace.
         edc_corrected = False
         if error_choice == "Bit de Paridade Par":
             after_edc, edc_error = erros_core.verify_and_remove_even_parity(rx_bits)
@@ -708,7 +740,7 @@ class TelecomSimulatorApp:
             after_edc, edc_error = erros_core.verify_and_correct_hamming(list(rx_bits))
             edc_corrected = edc_error and error_choice == "Código de Hamming"
 
-        # 3. Desenquadramento
+        # 3. Remove o enquadramento para recuperar o payload original.
         if framing_choice == "Contagem de Caracteres":
             raw_payloads = enquadramento.remove_character_count_framing([after_edc])
         elif framing_choice == "Inserção de Bytes":
@@ -720,8 +752,7 @@ class TelecomSimulatorApp:
         for rp in raw_payloads:
             payload_bits.extend(rp)
 
-        # Não remover zeros finais — muitos caracteres ASCII terminam em 0 (ex.: 'b' = 01100010).
-        # O desenquadramento já delimita o payload; só descartamos byte incompleto no final.
+        # Remove apenas o byte incompleto no final; não apaga zeros válidos que fazem parte do ASCII.
         final_bits = list(payload_bits)
         remainder = len(final_bits) % 8
         if remainder:
@@ -729,7 +760,7 @@ class TelecomSimulatorApp:
 
         final_text = utils.bitstream_to_string(final_bits) if final_bits else None
 
-        # ── Status ──
+        # ── Status visual ──
         self.lbl_rx_signal.config(text=f"Sinal recebido: {self._signal_stats(noisy_signal)}")
 
         if edc_error:
@@ -762,7 +793,7 @@ class TelecomSimulatorApp:
             self.lbl_decoded_msg.config(text=f'"{final_text}"', foreground=C["success"])
             self.lbl_decode.config(text="Decodificação: ASCII recuperado com sucesso", fg=C["success"])
 
-        # ── Pipeline RX ──
+        # ── Pipeline visual da recepção ──
         rx_steps = [
             {
                 "num": 1, "title": "Pacote recebido via socket (pickle)",
