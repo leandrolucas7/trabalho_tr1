@@ -1,0 +1,68 @@
+# MAYDAY - Simulador OSI
+
+Este projeto é um simulador didático que replica o funcionamento de um pipeline transmissão de mensagens através da rede, cobrindo as subcamadas lógicas e físicas das camadas de **Enlace** e **Física** do Modelo OSI. 
+
+A aplicação realiza a transmissão de mensagens de texto de ponta a ponta em ambiente local via sockets TCP, aplicando algoritmos reais de enquadramento, códigos de detecção/correção de erro, modulação digital em banda base, e modulação analógica com portadora através de um canal ruidoso simulado.
+
+## ⚡ Quick Start
+
+1. **Acesse o diretório do projeto no terminal.**
+
+2. **Agora, construiremos e configuraremos o ambiente virtual para executar o aplicativo.**
+    - OBS: Linux/Mac e Windows requerem comandos diferentes
+- **🐧 Linux /  Mac**
+```bash
+python3 -m venv .venv
+
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+- **⊞ Windows:**
+```bash
+py -m venv .venv
+
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+.venv\Scripts\python
+
+pip install -r requirements.txt
+```
+
+3. **Por fim, executamos a aplicação.**
+```bash
+python main.py
+```
+
+## 🚀 Funcionalidades e Arquitetura
+
+O simulador é estruturado de forma modula e simétrica, onde as etapas aplicadas no Transmissor são processadas em ordem rigorosamente inversa no Receptor:
+
+1. **Camada de Aplicação:** Entrada de strings alfanuméricas convertidas em bitstreams lógicos (ASCII).
+2. **Camada de Enlace (Enquadramento):** Fragmentação e delimitação de frames utilizando técnicas de *Contagem de Caracteres*, *Inserção de Bytes (Byte Stuffing)* ou *Inserção de Bits (Bit Stuffing)*.
+3. **Camada de Enlace (EDC/ECC):** Proteção matemática de integridade de dados usando *Bit de Paridade Par*, *Checksum (8-bit)*, *CRC-32 (IEEE 802)* ou auto-correção via *Código de Hamming*.
+4. **Camada Física (Modulação Digital):** Geração de sinais em banda base através das codificações *NRZ-Polar*, *Manchester* ou *Bipolar (AMI)*.
+5. **Camada Física (Modulação Analógica):** Passagem do sinal digital para banda passante (ondas senoidais de rádio frequência) utilizando chaves de modulação *ASK*, *FSK*, *QPSK* ou *16-QAM*.
+6. **Simulação de Canal (AWGN):** Injeção de Ruído Branco Gaussiano Aditivo personalizado por parâmetros matemáticos de Média ($\mu$) e Desvio Padrão ($\sigma$).
+7. **Abordagem Científica de Redes:** Comunicação descentralizada via sockets através da serialização de um "Pacote Inteligente" de parâmetros via `pickle`, forçando o receptor a demodular e desenquadrar o sinal de maneira totalmente autônoma.
+8. **Interface Gráfica Interativa (GUI):** Gráficos de alta visibilidade acadêmica criados em Matplotlib que se adaptam dinamicamente ao contexto selecionado, incluindo diagramas de constelação I/Q para constatação do efeito do espalhamento do ruído em tempo real.
+
+---
+
+## 📂 Estrutura de Diretórios
+
+```text
+.
+├── core/                       # Núcleo de processamento matemático e físico
+│   ├── canal.py                # Injeção de ruído Gaussiano (AWGN)
+│   ├── enlace_enquadramento.py # Algoritmos de enquadramento e desfragmentação
+│   ├── enlace_erros.py         # Mecanismos de proteção contra erros (EDC/ECC)
+│   ├── fisica_digital.py       # Codificações de linha (Banda Base)
+│   ├── fisica_portadora.py     # Modulações analógicas (Banda Passante)
+│   └── utils.py                # Funções utilitárias de conversão (String/Bits)
+├── gui/                        # Interface gráfica da aplicação
+│   └── app.py                  # Janelas Tkinter, layouts dinâmicos e Matplotlib
+├── network/                    # Infraestrutura de rede local
+│   └── comunicacao.py          # Arquitetura cliente/servidor TCP via socket e pickle
+├── main.py                     # Script principal de inicialização unificada
+└── requirements.txt            # Dependências oficiais do ecossistema

@@ -334,7 +334,7 @@ class TelecomSimulatorApp:
         ctrl_outer = ttk.LabelFrame(paned, text=" Receptor ", padding=14)
         paned.add(ctrl_outer, weight=0)
 
-        proto_frame = ttk.LabelFrame(ctrl_outer, text=" Parâmetros recebidos (pickle / socket) ", padding=10)
+        proto_frame = ttk.LabelFrame(ctrl_outer, text=" Parâmetros recebidos", padding=10)
         proto_frame.pack(fill="x", pady=(0, 12))
 
         self.lbl_rx_protocol = ttk.Label(
